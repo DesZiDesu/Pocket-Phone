@@ -1,127 +1,348 @@
-// Pocket Phone 0.10.2 integration fork.
-// Loads the pinned upstream implementation, then loads the optional feature suite
-// as one normal external script. No blob: URLs or inline eval are used.
+// Pocket Phone 0.9.10 integration fork.
+// Loads the pinned upstream Pocket Phone 0.9.9 implementation, then installs
+// a built-in normal-roleplay bridge. No Lorebook is required.
 
-const POCKET_PHONE_VERSION = '0.10.2';
+const POCKET_PHONE_VERSION = '0.9.10';
 const POCKET_PHONE_UPSTREAM_VERSION = '0.9.9';
 const POCKET_PHONE_UPSTREAM_COMMIT = 'f22ed2fcced366031b6f88271db921ebcf007d32';
-const POCKET_PHONE_FEATURE_COMMIT = 'e8a0f0aff4c10f180154ea987acbce10131bf2bd';
-const POCKET_PHONE_UPSTREAM_URL = `https://cdn.jsdelivr.net/gh/janzanaja188-cyber/pocket-phone@${POCKET_PHONE_UPSTREAM_COMMIT}/index.js`;
-const POCKET_PHONE_FEATURE_URL = `https://cdn.jsdelivr.net/combine/gh/DesZiDesu/Pocket-Phone@${POCKET_PHONE_FEATURE_COMMIT}/features/feature-suite.01.js,gh/DesZiDesu/Pocket-Phone@${POCKET_PHONE_FEATURE_COMMIT}/features/feature-suite.02.js,gh/DesZiDesu/Pocket-Phone@${POCKET_PHONE_FEATURE_COMMIT}/features/feature-suite.03.js,gh/DesZiDesu/Pocket-Phone@${POCKET_PHONE_FEATURE_COMMIT}/features/feature-suite.04.js,gh/DesZiDesu/Pocket-Phone@${POCKET_PHONE_FEATURE_COMMIT}/features/feature-suite.05.js,gh/DesZiDesu/Pocket-Phone@${POCKET_PHONE_FEATURE_COMMIT}/features/feature-suite.06.js`;
-const LOADER_KEY = '__deszidesuPocketPhoneLoader0102';
-const INTERCEPTOR_WRAPPER_KEY = '__deszidesuPocketPhoneInterceptorWrapper0100';
+const POCKET_PHONE_SCRIPT_URL = `https://cdn.jsdelivr.net/gh/janzanaja188-cyber/pocket-phone@${POCKET_PHONE_UPSTREAM_COMMIT}/index.js`;
+const LOADER_KEY = '__deszidesuPocketPhoneLoader';
+const BRIDGE_KEY = '__deszidesuPocketPhoneNormalRoleplayBridge';
+const BRIDGE_MIGRATION_KEY = 'normalRoleplayBridgeV1';
 
-window.PP_FORK_VERSION = POCKET_PHONE_VERSION;
+const NORMAL_ROLEPLAY_INSTRUCTION = `[Pocket Phone normal-roleplay integration — invisible machine commands for the installed Pocket Phone extension.
+Write the ordinary roleplay response normally. Only when a phone-side event truly happens, append the appropriate command on its own final line, outside narration and dialogue. Never explain, quote, roleplay, or put these commands in a code fence. Use exact saved Pocket Phone contact names whenever possible. Do not force phone activity every turn. Never decide that the user answered, accepted, read, paid, followed, voted, or picked up unless that already happened.
 
-if (!window[INTERCEPTOR_WRAPPER_KEY]) {
-    window[INTERCEPTOR_WRAPPER_KEY] = function pocketPhoneInterceptorWrapper(...args) {
-        const suite = window.__ppFeatureSuiteInterceptor;
-        if (typeof suite === 'function') return suite.apply(this, args);
-        const upstream = window.__ppUpstreamInterceptor;
-        if (typeof upstream === 'function') return upstream.apply(this, args);
-    };
+Existing contact sends text: [PP_MSG:Contact Name|message]
+New NPC starts first phone thread: [PP_NEWCHAT:New NPC Name|first message]
+Existing contact starts incoming call: [PP_CALL:Contact Name]
+Existing contact sends voice message: [PP_VOICE:Contact Name|spoken transcription]
+Existing contact sends configured sticker: [PP_STICKER:Contact Name|exact sticker label]
+Existing contact shares location: [PP_LOCATION:Contact Name|place|optional note]
+Existing contact changes status/note: [PP_NOTE:Contact Name|short status]
+Existing contact sends poll: [PP_POLL:Contact Name|question|option 1|option 2|more options]
+Existing contact sends gift: [PP_GIFT:Contact Name|gift name|optional whole-number value]
+Existing contact shares another saved contact: [PP_CONTACT:Contact Name|Shared Contact Name]
+Existing contact transfers money to the user: [PP_PAY:Contact Name|whole-number amount|reason]
+User earns money from a story event without a specific sender: [PP_EARN:whole-number amount|reason]
+Existing contact follows or requests to follow the user: [PP_FOLLOW:Contact Name]
+
+Rules: one command per line; multiple commands are allowed only when multiple events really occur. Amounts use positive whole digits without commas or currency symbols. Do not put ] inside fields. Use PP_NEWCHAT only for someone not already saved. Do not invent other PP_ commands.]`;
+
+const getSillyTavernContext = () => {
+    try { return window.SillyTavern?.getContext?.() || null; } catch { return null; }
+};
+
+const getBridgeConfig = () => {
+    const context = getSillyTavernContext();
+    try {
+        if (typeof window.getCfg === 'function') return window.getCfg();
+    } catch {}
+    return context?.extensionSettings?.['pocket-phone'] || null;
+};
+
+let upstreamGenerationInterceptor = (() => {
+    const existing = window.ppGenInterceptor;
+    return typeof existing === 'function' && !existing.__ppNormalRoleplayBridge ? existing : null;
+})();
+
+function pocketPhoneGenerationInterceptor(...args) {
+    if (typeof upstreamGenerationInterceptor === 'function') {
+        try { upstreamGenerationInterceptor.apply(this, args); }
+        catch (error) { console.warn('[Pocket Phone bridge] upstream generation interceptor failed', error); }
+    }
+
+    try {
+        const chat = args[0];
+        const cfg = getBridgeConfig();
+        if (!cfg?.universeAffectsRP || !Array.isArray(chat)) return;
+        if (chat.some(message => String(message?.mes || '').includes('[Pocket Phone normal-roleplay integration'))) return;
+        chat.push({
+            is_user: false,
+            is_system: true,
+            name: 'PocketPhoneBridge',
+            mes: NORMAL_ROLEPLAY_INSTRUCTION,
+        });
+    } catch (error) {
+        console.warn('[Pocket Phone bridge] generation instruction failed', error);
+    }
 }
-window.ppGenInterceptor = window[INTERCEPTOR_WRAPPER_KEY];
 
-function loadClassicScript(url, marker) {
-    return new Promise((resolve, reject) => {
-        const selector = `script[data-pocket-phone-module="${marker}"]`;
-        const existing = document.querySelector(selector);
-        if (existing) {
-            if (existing.dataset.loaded === 'true') {
-                resolve();
-                return;
+pocketPhoneGenerationInterceptor.__ppNormalRoleplayBridge = true;
+window.ppGenInterceptor = pocketPhoneGenerationInterceptor;
+
+function installPocketPhoneNormalRoleplayBridge() {
+    if (window[BRIDGE_KEY]) return;
+
+    const context = getSillyTavernContext();
+
+    if (!context) {
+        console.warn('[Pocket Phone bridge] SillyTavern context was not available.');
+        return;
+    }
+
+    const callGlobal = (name, ...args) => {
+        const fn = window[name];
+        return typeof fn === 'function' ? fn(...args) : undefined;
+    };
+
+    const getConfig = () => getBridgeConfig();
+
+    const saveSettings = () => {
+        try {
+            if (typeof context.saveSettingsDebounced === 'function') context.saveSettingsDebounced();
+            else callGlobal('saveCfg');
+        } catch {}
+    };
+
+    // One-time migration: enable the bridge for existing installations. After this,
+    // users can turn the settings off and the extension will respect that choice.
+    const initialConfig = getConfig();
+    if (initialConfig && !initialConfig[BRIDGE_MIGRATION_KEY]) {
+        initialConfig.sharedUniverse = true;
+        initialConfig.universeAffectsRP = true;
+        initialConfig.botCallKeyword = true;
+        initialConfig[BRIDGE_MIGRATION_KEY] = true;
+        saveSettings();
+        try { window.toastr?.info('Pocket Phone normal-chat integration is enabled.'); } catch {}
+    }
+
+    const installedInterceptor = window.ppGenInterceptor;
+    if (typeof installedInterceptor === 'function'
+        && installedInterceptor !== pocketPhoneGenerationInterceptor
+        && !installedInterceptor.__ppNormalRoleplayBridge) {
+        upstreamGenerationInterceptor = installedInterceptor;
+    }
+    window.ppGenInterceptor = pocketPhoneGenerationInterceptor;
+
+    if (!context.eventSource || !context.event_types) {
+        console.warn('[Pocket Phone bridge] SillyTavern event API was not available.');
+        return;
+    }
+
+    let lastFingerprint = '';
+
+    const displayName = contact => {
+        try { return callGlobal('dname', contact) || contact?.customName || contact?.name || '?'; }
+        catch { return contact?.customName || contact?.name || '?'; }
+    };
+
+    const findContactByName = rawName => {
+        const name = String(rawName || '').trim();
+        const contacts = callGlobal('getContacts') || [];
+        const wanted = name.toLowerCase();
+        return contacts.find(contact => displayName(contact).toLowerCase() === wanted)
+            || contacts.find(contact => {
+                const shown = displayName(contact).toLowerCase();
+                return wanted && (wanted.includes(shown) || shown.includes(wanted));
+            })
+            || null;
+    };
+
+    const makeId = () => {
+        try { return callGlobal('newId') || `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`; }
+        catch { return `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`; }
+    };
+
+    const resolveOrCreateContact = rawName => {
+        const name = String(rawName || '').trim();
+        if (!name) return null;
+        const existing = findContactByName(name);
+        if (existing) return existing;
+
+        const cfg = getConfig();
+        if (!cfg || !Array.isArray(cfg.contacts)) return null;
+
+        let matchedCharacter = null;
+        try {
+            const characters = callGlobal('listStCharacters') || [];
+            matchedCharacter = characters.find(character => String(character?.name || '').toLowerCase() === name.toLowerCase()) || null;
+        } catch {}
+
+        const contact = matchedCharacter
+            ? { id: matchedCharacter.id, name: matchedCharacter.name, avatar: matchedCharacter.avatar }
+            : { id: `npc:${makeId()}`, name, avatar: '', npc: true };
+        cfg.contacts.push(contact);
+        saveSettings();
+        return contact;
+    };
+
+    const refreshPhoneViews = contact => {
+        try {
+            if (callGlobal('ppViewing', contact.id)) callGlobal('renderThread');
+            else callGlobal('renderContactList');
+            callGlobal('updateHomeWidgets');
+        } catch {}
+    };
+
+    const notifyIncoming = (contact, kind, preview) => {
+        try { callGlobal('bumpUnread', contact.id, 1); } catch {}
+        try { callGlobal('pushNotif', contact.id, kind, preview); } catch {}
+        try { callGlobal('islandNotify', contact, preview); } catch {}
+        refreshPhoneViews(contact);
+    };
+
+    const pushIncoming = (contact, message, kind, preview) => {
+        if (!contact || !message) return false;
+        callGlobal('pushThreadMsg', contact.id, { from: 'them', ...message });
+        notifyIncoming(contact, kind || 'msg', preview || displayName(contact));
+        return true;
+    };
+
+    const parseExtendedTags = async () => {
+        try {
+            const cfg = getConfig();
+            if (!cfg?.universeAffectsRP) return;
+
+            const current = getSillyTavernContext();
+            if (!current || !Array.isArray(current.chat) || !current.chat.length) return;
+            const last = current.chat[current.chat.length - 1];
+            if (!last || last.is_user) return;
+
+            const original = String(last.mes || '');
+            const fingerprint = `${original.length}|${original.slice(0, 48)}|${original.slice(-48)}`;
+            if (fingerprint === lastFingerprint) return;
+            lastFingerprint = fingerprint;
+
+            let found = false;
+            const tagPattern = /\[PP_(VOICE|STICKER|LOCATION|NOTE|POLL|GIFT|CONTACT):\s*([^\]]+)\]/gi;
+            let match;
+            while ((match = tagPattern.exec(original))) {
+                const type = match[1].toUpperCase();
+                const parts = String(match[2]).split('|').map(part => part.trim());
+                const senderName = parts.shift() || '';
+                const contact = resolveOrCreateContact(senderName);
+                if (!contact) continue;
+
+                if (type === 'VOICE') {
+                    const text = parts.join('|').trim();
+                    if (text) {
+                        const duration = Math.min(60, Math.max(2, Math.round(text.length / 8)));
+                        found = pushIncoming(contact, { type: 'voice', text, dur: duration }, 'msg', `Voice message from ${displayName(contact)}`) || found;
+                    }
+                } else if (type === 'STICKER') {
+                    const label = parts.join('|').trim();
+                    const sticker = callGlobal('findStickerByLabel', label);
+                    if (sticker?.url) {
+                        found = pushIncoming(contact, { type: 'sticker', url: sticker.url, label: sticker.label || label }, 'msg', `${displayName(contact)} sent a sticker`) || found;
+                    } else if (label) {
+                        found = pushIncoming(contact, { text: `[Sticker: ${label}]` }, 'msg', `${displayName(contact)} sent a sticker`) || found;
+                    }
+                } else if (type === 'LOCATION') {
+                    const place = parts.shift() || '';
+                    const note = parts.join('|').trim();
+                    if (place) found = pushIncoming(contact, { type: 'location', place, note }, 'msg', `${displayName(contact)} shared ${place}`) || found;
+                } else if (type === 'NOTE') {
+                    const status = parts.join('|').trim();
+                    if (status) {
+                        callGlobal('setBotNote', contact.id, status);
+                        callGlobal('pushNotif', contact.id, 'note', `${displayName(contact)} updated their status: ${status}`);
+                        callGlobal('updateHomeWidgets');
+                        found = true;
+                    }
+                } else if (type === 'POLL') {
+                    const question = parts.shift() || '';
+                    const options = parts.filter(Boolean).slice(0, 8);
+                    if (question && options.length >= 2) {
+                        found = pushIncoming(contact, {
+                            type: 'poll',
+                            question,
+                            options: options.map(text => ({ text, votes: [] })),
+                        }, 'msg', `${displayName(contact)} sent a poll`) || found;
+                    }
+                } else if (type === 'GIFT') {
+                    const giftName = parts.shift() || '';
+                    const amount = Math.max(0, Number.parseInt(parts.shift() || '0', 10) || 0);
+                    if (giftName) found = pushIncoming(contact, { type: 'gift', giftName, amount }, 'msg', `${displayName(contact)} sent ${giftName}`) || found;
+                } else if (type === 'CONTACT') {
+                    const sharedName = parts.join('|').trim();
+                    const shared = findContactByName(sharedName);
+                    if (shared) {
+                        found = pushIncoming(contact, {
+                            type: 'contactcard',
+                            cardId: shared.id,
+                            cardName: displayName(shared),
+                        }, 'msg', `${displayName(contact)} shared ${displayName(shared)}'s contact`) || found;
+                    }
+                }
             }
-            existing.addEventListener('load', resolve, { once: true });
-            existing.addEventListener('error', reject, { once: true });
+
+            const hasExtendedTag = /\[PP_(?:VOICE|STICKER|LOCATION|NOTE|POLL|GIFT|CONTACT):/i.test(original);
+            if (!found && !hasExtendedTag) return;
+
+            const cleaned = original
+                .replace(/\[PP_(?:VOICE|STICKER|LOCATION|NOTE|POLL|GIFT|CONTACT):[^\]]*\]/gi, '')
+                .replace(/[ \t]{2,}/g, ' ')
+                .replace(/\n{3,}/g, '\n\n')
+                .trim();
+
+            if (cleaned !== original) {
+                last.mes = cleaned;
+                const index = current.chat.length - 1;
+                try {
+                    const node = document.querySelector(`#chat .mes[mesid="${index}"] .mes_text`);
+                    if (node && typeof current.messageFormatting === 'function') {
+                        node.innerHTML = current.messageFormatting(cleaned, last.name, false, false, index);
+                    }
+                } catch {}
+                try {
+                    if (typeof current.saveChatDebounced === 'function') current.saveChatDebounced();
+                    else if (typeof current.saveChat === 'function') await current.saveChat();
+                    else await callGlobal('ppSaveChatNow');
+                } catch {}
+            }
+        } catch (error) {
+            console.warn('[Pocket Phone bridge] tag processing failed', error);
+        }
+    };
+
+    const events = context.event_types;
+    if (events.MESSAGE_RECEIVED) context.eventSource.on(events.MESSAGE_RECEIVED, () => setTimeout(parseExtendedTags, 260));
+    if (events.CHARACTER_MESSAGE_RENDERED) context.eventSource.on(events.CHARACTER_MESSAGE_RENDERED, () => setTimeout(parseExtendedTags, 260));
+
+    window[BRIDGE_KEY] = {
+        version: '1.1.0',
+        parseExtendedTags,
+        instruction: NORMAL_ROLEPLAY_INSTRUCTION,
+    };
+    console.info('[Pocket Phone bridge] Built-in normal-roleplay integration installed. No Lorebook required.');
+}
+
+if (!window[LOADER_KEY]) {
+    window[LOADER_KEY] = new Promise((resolve, reject) => {
+        const existing = document.querySelector(`script[data-pocket-phone-mirror="${POCKET_PHONE_UPSTREAM_VERSION}"]`);
+        if (existing) {
+            if (existing.dataset.loaded === 'true') resolve();
+            else {
+                existing.addEventListener('load', resolve, { once: true });
+                existing.addEventListener('error', reject, { once: true });
+            }
             return;
         }
 
         const script = document.createElement('script');
-        script.src = url;
+        script.src = POCKET_PHONE_SCRIPT_URL;
         script.async = false;
-        script.dataset.pocketPhoneModule = marker;
+        script.dataset.pocketPhoneMirror = POCKET_PHONE_UPSTREAM_VERSION;
         script.addEventListener('load', () => {
             script.dataset.loaded = 'true';
+            console.info(`[Pocket Phone ${POCKET_PHONE_VERSION}] Loaded upstream ${POCKET_PHONE_UPSTREAM_VERSION} from pinned commit ${POCKET_PHONE_UPSTREAM_COMMIT}.`);
             resolve();
         }, { once: true });
         script.addEventListener('error', () => {
-            reject(new Error(`Failed to load ${marker} from ${url}`));
+            const error = new Error(`Unable to load Pocket Phone ${POCKET_PHONE_UPSTREAM_VERSION} from ${POCKET_PHONE_SCRIPT_URL}`);
+            console.error('[Pocket Phone mirror]', error);
+            try {
+                window.toastr?.error('Pocket Phone could not be downloaded. Check your internet connection and reload SillyTavern.');
+            } catch {}
+            reject(error);
         }, { once: true });
         document.head.appendChild(script);
     });
 }
 
-function patchVisibleVersion(root = document) {
-    try {
-        const targets = [];
-        if (root.nodeType === Node.ELEMENT_NODE || root.nodeType === Node.DOCUMENT_NODE) targets.push(root);
-        if (root.querySelectorAll) targets.push(...root.querySelectorAll('#pp-dialog, #pp-settings-body, .pp-hint'));
-
-        const seen = new Set();
-        for (const target of targets) {
-            if (!target || seen.has(target)) continue;
-            seen.add(target);
-            const walker = document.createTreeWalker(target, NodeFilter.SHOW_TEXT);
-            let node;
-            while ((node = walker.nextNode())) {
-                if (node.nodeValue?.includes('Pocket Phone 0.9.9')) {
-                    node.nodeValue = node.nodeValue.replaceAll('Pocket Phone 0.9.9', `Pocket Phone ${POCKET_PHONE_VERSION}`);
-                }
-            }
-        }
-    } catch (error) {
-        console.debug('[Pocket Phone] Version label patch skipped.', error);
-    }
-}
-
-function installVersionPatch() {
-    const start = () => {
-        patchVisibleVersion(document);
-        const observer = new MutationObserver(records => {
-            for (const record of records) {
-                for (const node of record.addedNodes) patchVisibleVersion(node);
-            }
-        });
-        observer.observe(document.documentElement, { childList: true, subtree: true });
-    };
-
-    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start, { once: true });
-    else start();
-}
-
-async function loadUpstream() {
-    await loadClassicScript(POCKET_PHONE_UPSTREAM_URL, `upstream-${POCKET_PHONE_UPSTREAM_VERSION}`);
-    const loaded = window.ppGenInterceptor;
-    if (typeof loaded === 'function' && loaded !== window[INTERCEPTOR_WRAPPER_KEY]) {
-        window.__ppUpstreamInterceptor = loaded;
-    }
-    window.ppGenInterceptor = window[INTERCEPTOR_WRAPPER_KEY];
-    console.info(`[Pocket Phone ${POCKET_PHONE_VERSION}] Loaded upstream ${POCKET_PHONE_UPSTREAM_VERSION} from pinned commit ${POCKET_PHONE_UPSTREAM_COMMIT}.`);
-}
-
-async function loadOptionalFeatureSuite() {
-    try {
-        await loadClassicScript(POCKET_PHONE_FEATURE_URL, `feature-suite-${POCKET_PHONE_VERSION}`);
-        window.ppGenInterceptor = window[INTERCEPTOR_WRAPPER_KEY];
-        console.info(`[Pocket Phone ${POCKET_PHONE_VERSION}] Optional feature suite loaded.`);
-    } catch (error) {
-        console.error('[Pocket Phone] Optional feature suite failed to load; the base phone remains available.', error);
-        try {
-            window.toastr?.warning('Pocket Phone loaded, but optional features could not start. The base phone is still available.');
-        } catch {}
-    }
-}
-
-installVersionPatch();
-
-if (!window[LOADER_KEY]) {
-    window[LOADER_KEY] = loadUpstream()
-        .then(loadOptionalFeatureSuite)
-        .catch(error => {
-            console.error('[Pocket Phone] Base phone failed to load.', error);
-            try {
-                window.toastr?.error('Pocket Phone base could not load. Check the network connection and reload SillyTavern.');
-            } catch {}
-        });
-}
+window[LOADER_KEY]
+    .then(() => installPocketPhoneNormalRoleplayBridge())
+    .catch(() => {
+        // The detailed load error is logged above.
+    });
