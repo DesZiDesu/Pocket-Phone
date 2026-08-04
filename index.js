@@ -1,35 +1,17 @@
-// Pocket Phone 0.10.1 integration fork.
-// Loads the pinned upstream implementation, installs the optional feature suite,
-// and corrects the visible upstream version label. All suite features default off.
+// Pocket Phone 0.10.2 integration fork.
+// Loads the pinned upstream implementation, then loads the optional feature suite
+// as one normal external script. No blob: URLs or inline eval are used.
 
-const POCKET_PHONE_VERSION = '0.10.1';
+const POCKET_PHONE_VERSION = '0.10.2';
 const POCKET_PHONE_UPSTREAM_VERSION = '0.9.9';
 const POCKET_PHONE_UPSTREAM_COMMIT = 'f22ed2fcced366031b6f88271db921ebcf007d32';
+const POCKET_PHONE_FEATURE_COMMIT = 'e8a0f0aff4c10f180154ea987acbce10131bf2bd';
 const POCKET_PHONE_UPSTREAM_URL = `https://cdn.jsdelivr.net/gh/janzanaja188-cyber/pocket-phone@${POCKET_PHONE_UPSTREAM_COMMIT}/index.js`;
-const POCKET_PHONE_LOCAL_BASE = new URL('.', document.currentScript?.src || location.href).href;
-const POCKET_PHONE_SUITE_PARTS = [
-    'features/feature-suite.01.txt',
-    'features/feature-suite.02.txt',
-    'features/feature-suite.03.txt',
-    'features/feature-suite.04.txt',
-    'features/feature-suite.05.txt',
-    'features/feature-suite.06.txt',
-].map(path => new URL(path, POCKET_PHONE_LOCAL_BASE).href);
-const LOADER_KEY = '__deszidesuPocketPhoneLoader0101';
-const INTERCEPTOR_WRAPPER_KEY = '__deszidesuPocketPhoneInterceptorWrapper0101';
-const VERSION_PATCH_KEY = '__deszidesuPocketPhoneVisibleVersionPatch0101';
-const UPSTREAM_CACHE_KEY = '__pp_upstream_099_cache';
+const POCKET_PHONE_FEATURE_URL = `https://cdn.jsdelivr.net/combine/gh/DesZiDesu/Pocket-Phone@${POCKET_PHONE_FEATURE_COMMIT}/features/feature-suite.01.js,gh/DesZiDesu/Pocket-Phone@${POCKET_PHONE_FEATURE_COMMIT}/features/feature-suite.02.js,gh/DesZiDesu/Pocket-Phone@${POCKET_PHONE_FEATURE_COMMIT}/features/feature-suite.03.js,gh/DesZiDesu/Pocket-Phone@${POCKET_PHONE_FEATURE_COMMIT}/features/feature-suite.04.js,gh/DesZiDesu/Pocket-Phone@${POCKET_PHONE_FEATURE_COMMIT}/features/feature-suite.05.js,gh/DesZiDesu/Pocket-Phone@${POCKET_PHONE_FEATURE_COMMIT}/features/feature-suite.06.js`;
+const LOADER_KEY = '__deszidesuPocketPhoneLoader0102';
+const INTERCEPTOR_WRAPPER_KEY = '__deszidesuPocketPhoneInterceptorWrapper0100';
 
 window.PP_FORK_VERSION = POCKET_PHONE_VERSION;
-
-function readFeatureSuiteFlags() {
-    try {
-        const mirror = JSON.parse(localStorage.getItem('pp_cfg_mirror') || '{}');
-        return mirror?.featureSuite || {};
-    } catch {
-        return {};
-    }
-}
 
 if (!window[INTERCEPTOR_WRAPPER_KEY]) {
     window[INTERCEPTOR_WRAPPER_KEY] = function pocketPhoneInterceptorWrapper(...args) {
@@ -41,131 +23,105 @@ if (!window[INTERCEPTOR_WRAPPER_KEY]) {
 }
 window.ppGenInterceptor = window[INTERCEPTOR_WRAPPER_KEY];
 
-function executeSource(source) {
+function loadClassicScript(url, marker) {
     return new Promise((resolve, reject) => {
-        try {
-            const blob = new Blob([source], { type: 'text/javascript' });
-            const url = URL.createObjectURL(blob);
-            const script = document.createElement('script');
-            script.src = url;
-            script.async = false;
-            script.addEventListener('load', () => {
-                URL.revokeObjectURL(url);
-                resolve();
-            }, { once: true });
-            script.addEventListener('error', event => {
-                URL.revokeObjectURL(url);
-                reject(event);
-            }, { once: true });
-            document.head.appendChild(script);
-        } catch (error) {
-            reject(error);
-        }
-    });
-}
-
-function loadUpstreamByScriptTag() {
-    return new Promise((resolve, reject) => {
-        const existing = document.querySelector(`script[data-pocket-phone-upstream="${POCKET_PHONE_UPSTREAM_VERSION}"]`);
+        const selector = `script[data-pocket-phone-module="${marker}"]`;
+        const existing = document.querySelector(selector);
         if (existing) {
-            if (existing.dataset.loaded === 'true') resolve();
-            else {
-                existing.addEventListener('load', resolve, { once: true });
-                existing.addEventListener('error', reject, { once: true });
+            if (existing.dataset.loaded === 'true') {
+                resolve();
+                return;
             }
+            existing.addEventListener('load', resolve, { once: true });
+            existing.addEventListener('error', reject, { once: true });
             return;
         }
 
         const script = document.createElement('script');
-        script.src = POCKET_PHONE_UPSTREAM_URL;
+        script.src = url;
         script.async = false;
-        script.dataset.pocketPhoneUpstream = POCKET_PHONE_UPSTREAM_VERSION;
+        script.dataset.pocketPhoneModule = marker;
         script.addEventListener('load', () => {
             script.dataset.loaded = 'true';
             resolve();
         }, { once: true });
-        script.addEventListener('error', reject, { once: true });
+        script.addEventListener('error', () => {
+            reject(new Error(`Failed to load ${marker} from ${url}`));
+        }, { once: true });
         document.head.appendChild(script);
     });
 }
 
-async function loadUpstream() {
-    const flags = readFeatureSuiteFlags();
-    if (!flags.offlineCacheEnabled) {
-        await loadUpstreamByScriptTag();
-        return;
-    }
-
+function patchVisibleVersion(root = document) {
     try {
-        const response = await fetch(POCKET_PHONE_UPSTREAM_URL, { cache: 'no-cache' });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const source = await response.text();
-        try { localStorage.setItem(UPSTREAM_CACHE_KEY, source); } catch {}
-        await executeSource(source);
-    } catch (networkError) {
-        const cached = localStorage.getItem(UPSTREAM_CACHE_KEY);
-        if (!cached) throw networkError;
-        console.warn('[Pocket Phone] Network load failed; using the optional cached upstream source.', networkError);
-        await executeSource(cached);
+        const targets = [];
+        if (root.nodeType === Node.ELEMENT_NODE || root.nodeType === Node.DOCUMENT_NODE) targets.push(root);
+        if (root.querySelectorAll) targets.push(...root.querySelectorAll('#pp-dialog, #pp-settings-body, .pp-hint'));
+
+        const seen = new Set();
+        for (const target of targets) {
+            if (!target || seen.has(target)) continue;
+            seen.add(target);
+            const walker = document.createTreeWalker(target, NodeFilter.SHOW_TEXT);
+            let node;
+            while ((node = walker.nextNode())) {
+                if (node.nodeValue?.includes('Pocket Phone 0.9.9')) {
+                    node.nodeValue = node.nodeValue.replaceAll('Pocket Phone 0.9.9', `Pocket Phone ${POCKET_PHONE_VERSION}`);
+                }
+            }
+        }
+    } catch (error) {
+        console.debug('[Pocket Phone] Version label patch skipped.', error);
     }
 }
 
-async function loadFeatureSuite() {
-    const responses = await Promise.all(POCKET_PHONE_SUITE_PARTS.map(async url => {
-        const response = await fetch(url, { cache: 'no-cache' });
-        if (!response.ok) throw new Error(`Feature-suite part failed: ${url} (${response.status})`);
-        return response.text();
-    }));
-    await executeSource(responses.join('\n'));
+function installVersionPatch() {
+    const start = () => {
+        patchVisibleVersion(document);
+        const observer = new MutationObserver(records => {
+            for (const record of records) {
+                for (const node of record.addedNodes) patchVisibleVersion(node);
+            }
+        });
+        observer.observe(document.documentElement, { childList: true, subtree: true });
+    };
+
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start, { once: true });
+    else start();
 }
 
-function refreshVisibleVersionLabels() {
-    const root = document.getElementById('pp-dialog');
-    if (!root) return;
+async function loadUpstream() {
+    await loadClassicScript(POCKET_PHONE_UPSTREAM_URL, `upstream-${POCKET_PHONE_UPSTREAM_VERSION}`);
+    const loaded = window.ppGenInterceptor;
+    if (typeof loaded === 'function' && loaded !== window[INTERCEPTOR_WRAPPER_KEY]) {
+        window.__ppUpstreamInterceptor = loaded;
+    }
+    window.ppGenInterceptor = window[INTERCEPTOR_WRAPPER_KEY];
+    console.info(`[Pocket Phone ${POCKET_PHONE_VERSION}] Loaded upstream ${POCKET_PHONE_UPSTREAM_VERSION} from pinned commit ${POCKET_PHONE_UPSTREAM_COMMIT}.`);
+}
 
-    const oldLabel = `Pocket Phone ${POCKET_PHONE_UPSTREAM_VERSION}`;
-    const newLabel = `Pocket Phone ${POCKET_PHONE_VERSION}`;
-    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-    let node;
-    while ((node = walker.nextNode())) {
-        const value = node.nodeValue || '';
-        if (value.includes(oldLabel)) node.nodeValue = value.split(oldLabel).join(newLabel);
+async function loadOptionalFeatureSuite() {
+    try {
+        await loadClassicScript(POCKET_PHONE_FEATURE_URL, `feature-suite-${POCKET_PHONE_VERSION}`);
+        window.ppGenInterceptor = window[INTERCEPTOR_WRAPPER_KEY];
+        console.info(`[Pocket Phone ${POCKET_PHONE_VERSION}] Optional feature suite loaded.`);
+    } catch (error) {
+        console.error('[Pocket Phone] Optional feature suite failed to load; the base phone remains available.', error);
+        try {
+            window.toastr?.warning('Pocket Phone loaded, but optional features could not start. The base phone is still available.');
+        } catch {}
     }
 }
 
-function installVisibleVersionPatch() {
-    if (window[VERSION_PATCH_KEY]) {
-        window[VERSION_PATCH_KEY].refresh();
-        return;
-    }
-
-    const observer = new MutationObserver(refreshVisibleVersionLabels);
-    observer.observe(document.documentElement, { childList: true, subtree: true, characterData: true });
-    window[VERSION_PATCH_KEY] = { observer, refresh: refreshVisibleVersionLabels };
-    refreshVisibleVersionLabels();
-}
+installVersionPatch();
 
 if (!window[LOADER_KEY]) {
     window[LOADER_KEY] = loadUpstream()
-        .then(() => {
-            const loaded = window.ppGenInterceptor;
-            if (typeof loaded === 'function' && loaded !== window[INTERCEPTOR_WRAPPER_KEY]) {
-                window.__ppUpstreamInterceptor = loaded;
-            }
-            window.ppGenInterceptor = window[INTERCEPTOR_WRAPPER_KEY];
-            installVisibleVersionPatch();
-            console.info(`[Pocket Phone ${POCKET_PHONE_VERSION}] Loaded upstream ${POCKET_PHONE_UPSTREAM_VERSION} from pinned commit ${POCKET_PHONE_UPSTREAM_COMMIT}.`);
-            return loadFeatureSuite();
-        })
-        .then(() => {
-            window.ppGenInterceptor = window[INTERCEPTOR_WRAPPER_KEY];
-            installVisibleVersionPatch();
-            console.info(`[Pocket Phone ${POCKET_PHONE_VERSION}] Optional feature suite loaded.`);
-        })
+        .then(loadOptionalFeatureSuite)
         .catch(error => {
-            console.error('[Pocket Phone]', error);
+            console.error('[Pocket Phone] Base phone failed to load.', error);
             try {
-                window.toastr?.error('Pocket Phone could not load. Check the browser console and reload SillyTavern.');
+                window.toastr?.error('Pocket Phone base could not load. Check the network connection and reload SillyTavern.');
             } catch {}
         });
 }
