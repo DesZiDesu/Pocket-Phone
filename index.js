@@ -11,7 +11,7 @@ const PP_CORE_SCRIPT_ID = 'pp-stable-local-core';
 function getPocketPhoneExtensionBaseUrl() {
     const scripts = Array.from(document.scripts || []);
     const entry = document.currentScript
-        || scripts.reverse().find(script => /\/Pocket-Phone\/index\.js(?:[?#]|$)/i.test(script.src || ''))
+        || scripts.slice().reverse().find(script => /\/Pocket-Phone\/index\.js(?:[?#]|$)/i.test(script.src || ''))
         || scripts.find(script => /\/pocket-phone\/index\.js(?:[?#]|$)/i.test(script.src || ''));
 
     if (entry?.src) return new URL('./', entry.src);
@@ -41,16 +41,10 @@ function isObsoletePocketPhoneResource(value) {
 }
 
 async function clearPocketPhoneCodeCaches() {
-    const report = {
-        globals: 0,
-        nodes: 0,
-        storage: 0,
-        cacheEntries: 0,
-    };
+    const report = { globals: 0, nodes: 0, storage: 0, cacheEntries: 0 };
 
     try {
-        const names = Object.getOwnPropertyNames(window);
-        for (const name of names) {
+        for (const name of Object.getOwnPropertyNames(window)) {
             const obsoleteLoader = /^__deszidesuPocketPhone/i.test(name)
                 || /^__pocketPhone(?:Feature|Loader|Suite)/i.test(name)
                 || /^pp(?:Feature|Optional)Suite/i.test(name);
@@ -95,11 +89,9 @@ async function clearPocketPhoneCodeCaches() {
 
     try {
         if ('caches' in window) {
-            const cacheNames = await window.caches.keys();
-            for (const cacheName of cacheNames) {
+            for (const cacheName of await window.caches.keys()) {
                 const cache = await window.caches.open(cacheName);
-                const requests = await cache.keys();
-                for (const request of requests) {
+                for (const request of await cache.keys()) {
                     if (!isPocketPhoneCodeUrl(request.url)) continue;
                     try {
                         if (await cache.delete(request)) report.cacheEntries += 1;
@@ -206,11 +198,13 @@ function createInlineRecoveryPanel() {
 
 function patchDisplayedRecoveryVersion(root = document) {
     try {
-        const candidates = [];
-        if (root?.nodeType === Node.ELEMENT_NODE || root?.nodeType === Node.DOCUMENT_NODE) candidates.push(root);
-        if (root?.querySelectorAll) candidates.push(...root.querySelectorAll('#pp-dialog, #pp-settings-body, .pp-hint'));
-        for (const candidate of candidates) {
-            const walker = document.createTreeWalker(candidate, NodeFilter.SHOW_TEXT);
+        const selector = '#pp-dialog, #pp-settings-body, .pp-hint';
+        const targets = [];
+        if (root?.matches?.(selector)) targets.push(root);
+        if (root?.querySelectorAll) targets.push(...root.querySelectorAll(selector));
+
+        for (const target of targets) {
+            const walker = document.createTreeWalker(target, NodeFilter.SHOW_TEXT);
             let node;
             while ((node = walker.nextNode())) {
                 if (node.nodeValue?.includes('Pocket Phone 0.10.3 Stable')) {
@@ -222,7 +216,7 @@ function patchDisplayedRecoveryVersion(root = document) {
 }
 
 function installRecoveryUi() {
-    const attach = () => {
+    const attachPanels = () => {
         const settingsRoot = document.querySelector('#extensions_settings2, #extensions_settings');
         if (settingsRoot && !document.getElementById(PP_RECOVERY_PANEL_ID)) {
             settingsRoot.appendChild(createMainRecoveryPanel());
@@ -232,17 +226,21 @@ function installRecoveryUi() {
         if (pocketPhoneSettings && !document.getElementById(PP_RECOVERY_INLINE_ID)) {
             pocketPhoneSettings.appendChild(createInlineRecoveryPanel());
         }
-
-        patchDisplayedRecoveryVersion(document);
     };
 
     const start = () => {
-        attach();
+        attachPanels();
+        patchDisplayedRecoveryVersion(document);
+
         const observer = new MutationObserver(records => {
+            let shouldCheckPanels = false;
             for (const record of records) {
-                for (const node of record.addedNodes) patchDisplayedRecoveryVersion(node);
+                for (const node of record.addedNodes) {
+                    patchDisplayedRecoveryVersion(node);
+                    if (node.nodeType === Node.ELEMENT_NODE) shouldCheckPanels = true;
+                }
             }
-            attach();
+            if (shouldCheckPanels) attachPanels();
         });
         observer.observe(document.documentElement, { childList: true, subtree: true });
     };
