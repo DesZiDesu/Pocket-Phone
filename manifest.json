@@ -1,0 +1,12 @@
+{
+    "display_name": "Pocket Phone",
+    "loading_order": 10,
+    "requires": [],
+    "optional": [],
+    "js": "index.js",
+    "css": "style.css",
+    "author": "Janz; compatibility mirror by DesZiDesu",
+    "version": "0.9.9",
+    "homePage": "https://github.com/DesZiDesu/Pocket-Phone",
+    "auto_update": true
+}
