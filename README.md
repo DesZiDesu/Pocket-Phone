@@ -1,8 +1,8 @@
-# Pocket Phone 0.10.0 — SillyTavern integration fork
+# Pocket Phone 0.10.1 — SillyTavern integration fork
 
 This fork packages Pocket Phone's normal-roleplay integration directly inside the extension. No Lorebook, World Info entry, Author's Note, or separate prompt is required.
 
-Version 0.10.0 adds an optional feature suite. **Every feature added by the suite defaults to off and can be enabled or disabled independently.** Existing Pocket Phone functionality and its original settings continue to work normally.
+Version 0.10.0 added an optional feature suite. **Every feature added by the suite defaults to off and can be enabled or disabled independently.** Version 0.10.1 corrects the stale in-phone 0.9.9 version label inherited from the pinned upstream engine.
 
 ## Install or update
 
@@ -12,7 +12,7 @@ In SillyTavern, open **Extensions → Install Extension** and use:
 https://github.com/DesZiDesu/Pocket-Phone
 ```
 
-For an existing installation, use the extension update button and fully reload SillyTavern. The Extensions panel should report **0.10.0**.
+For an existing installation, use the extension update button and fully reload SillyTavern. The Extensions panel and Pocket Phone settings footer should report **0.10.1**.
 
 ## Open the optional features
 
@@ -92,7 +92,7 @@ The manifest declares:
 "generate_interceptor": "ppGenInterceptor"
 ```
 
-The local loader registers the interceptor synchronously, loads the pinned upstream 0.9.9 implementation, then concatenates and executes the local optional feature-suite modules.
+The local loader registers the interceptor synchronously, loads the pinned upstream 0.9.9 implementation, then concatenates and executes the local optional feature-suite modules. Version 0.10.1 replaces the inherited visible `Pocket Phone 0.9.9` footer with the fork version so the displayed number is no longer misleading.
 
 Pinned upstream commit:
 
@@ -110,8 +110,8 @@ https://github.com/janzanaja188-cyber/pocket-phone
 
 After updating and reloading:
 
-1. Confirm the Extensions panel shows **0.10.0**.
-2. Open Pocket Phone Settings.
+1. Confirm the Extensions panel shows **0.10.1**.
+2. Open Pocket Phone Settings and confirm the footer also shows **0.10.1**.
 3. Confirm the **Optional feature suite** card appears.
 4. Open **Diagnostics**, enable it, and use **Test message** with at least one saved contact.
 5. Enable other systems individually after the basic test succeeds.
