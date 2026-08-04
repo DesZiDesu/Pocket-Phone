@@ -1,13 +1,13 @@
-// Pocket Phone 0.9.10 integration fork.
-// Loads the pinned upstream Pocket Phone 0.9.9 implementation, then installs
-// a built-in normal-roleplay bridge. No Lorebook is required.
+// Pocket Phone 0.10.3 Stable Recovery.
+// Uses the proven 0.9.10 normal-roleplay bridge without the optional feature suite.
+// No Lorebook is required.
 
-const POCKET_PHONE_VERSION = '0.9.10';
+const POCKET_PHONE_VERSION = '0.10.3';
 const POCKET_PHONE_UPSTREAM_VERSION = '0.9.9';
 const POCKET_PHONE_UPSTREAM_COMMIT = 'f22ed2fcced366031b6f88271db921ebcf007d32';
 const POCKET_PHONE_SCRIPT_URL = `https://cdn.jsdelivr.net/gh/janzanaja188-cyber/pocket-phone@${POCKET_PHONE_UPSTREAM_COMMIT}/index.js`;
-const LOADER_KEY = '__deszidesuPocketPhoneLoader';
-const BRIDGE_KEY = '__deszidesuPocketPhoneNormalRoleplayBridge';
+const LOADER_KEY = '__deszidesuPocketPhoneStableLoader0103';
+const BRIDGE_KEY = '__deszidesuPocketPhoneNormalRoleplayBridge0103';
 const BRIDGE_MIGRATION_KEY = 'normalRoleplayBridgeV1';
 
 const NORMAL_ROLEPLAY_INSTRUCTION = `[Pocket Phone normal-roleplay integration — invisible machine commands for the installed Pocket Phone extension.
@@ -71,6 +71,38 @@ function pocketPhoneGenerationInterceptor(...args) {
 pocketPhoneGenerationInterceptor.__ppNormalRoleplayBridge = true;
 window.ppGenInterceptor = pocketPhoneGenerationInterceptor;
 
+function patchVisibleForkVersion(root = document) {
+    try {
+        const targets = [];
+        if (root?.nodeType === Node.ELEMENT_NODE || root?.nodeType === Node.DOCUMENT_NODE) targets.push(root);
+        if (root?.querySelectorAll) targets.push(...root.querySelectorAll('#pp-dialog, #pp-settings-body, .pp-hint'));
+        for (const target of targets) {
+            if (!target) continue;
+            const walker = document.createTreeWalker(target, NodeFilter.SHOW_TEXT);
+            let node;
+            while ((node = walker.nextNode())) {
+                if (node.nodeValue?.includes('Pocket Phone 0.9.9')) {
+                    node.nodeValue = node.nodeValue.replaceAll('Pocket Phone 0.9.9', `Pocket Phone ${POCKET_PHONE_VERSION} Stable`);
+                }
+            }
+        }
+    } catch {}
+}
+
+function installVisibleVersionPatch() {
+    const start = () => {
+        patchVisibleForkVersion(document);
+        const observer = new MutationObserver(records => {
+            for (const record of records) {
+                for (const node of record.addedNodes) patchVisibleForkVersion(node);
+            }
+        });
+        observer.observe(document.documentElement, { childList: true, subtree: true });
+    };
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start, { once: true });
+    else start();
+}
+
 function installPocketPhoneNormalRoleplayBridge() {
     if (window[BRIDGE_KEY]) return;
 
@@ -95,8 +127,6 @@ function installPocketPhoneNormalRoleplayBridge() {
         } catch {}
     };
 
-    // One-time migration: enable the bridge for existing installations. After this,
-    // users can turn the settings off and the extension will respect that choice.
     const initialConfig = getConfig();
     if (initialConfig && !initialConfig[BRIDGE_MIGRATION_KEY]) {
         initialConfig.sharedUniverse = true;
@@ -305,12 +335,14 @@ function installPocketPhoneNormalRoleplayBridge() {
         parseExtendedTags,
         instruction: NORMAL_ROLEPLAY_INSTRUCTION,
     };
-    console.info('[Pocket Phone bridge] Built-in normal-roleplay integration installed. No Lorebook required.');
+    console.info('[Pocket Phone bridge] Stable built-in normal-roleplay integration installed. No Lorebook required.');
 }
+
+installVisibleVersionPatch();
 
 if (!window[LOADER_KEY]) {
     window[LOADER_KEY] = new Promise((resolve, reject) => {
-        const existing = document.querySelector(`script[data-pocket-phone-mirror="${POCKET_PHONE_UPSTREAM_VERSION}"]`);
+        const existing = document.querySelector(`script[data-pocket-phone-stable="${POCKET_PHONE_UPSTREAM_VERSION}"]`);
         if (existing) {
             if (existing.dataset.loaded === 'true') resolve();
             else {
@@ -323,17 +355,17 @@ if (!window[LOADER_KEY]) {
         const script = document.createElement('script');
         script.src = POCKET_PHONE_SCRIPT_URL;
         script.async = false;
-        script.dataset.pocketPhoneMirror = POCKET_PHONE_UPSTREAM_VERSION;
+        script.dataset.pocketPhoneStable = POCKET_PHONE_UPSTREAM_VERSION;
         script.addEventListener('load', () => {
             script.dataset.loaded = 'true';
-            console.info(`[Pocket Phone ${POCKET_PHONE_VERSION}] Loaded upstream ${POCKET_PHONE_UPSTREAM_VERSION} from pinned commit ${POCKET_PHONE_UPSTREAM_COMMIT}.`);
+            console.info(`[Pocket Phone ${POCKET_PHONE_VERSION} Stable] Loaded proven upstream ${POCKET_PHONE_UPSTREAM_VERSION}.`);
             resolve();
         }, { once: true });
         script.addEventListener('error', () => {
-            const error = new Error(`Unable to load Pocket Phone ${POCKET_PHONE_UPSTREAM_VERSION} from ${POCKET_PHONE_SCRIPT_URL}`);
-            console.error('[Pocket Phone mirror]', error);
+            const error = new Error(`Unable to load stable Pocket Phone base from ${POCKET_PHONE_SCRIPT_URL}`);
+            console.error('[Pocket Phone stable recovery]', error);
             try {
-                window.toastr?.error('Pocket Phone could not be downloaded. Check your internet connection and reload SillyTavern.');
+                window.toastr?.error('Pocket Phone stable base could not be downloaded. Check whether cdn.jsdelivr.net is blocked, then reload SillyTavern.');
             } catch {}
             reject(error);
         }, { once: true });
@@ -344,5 +376,5 @@ if (!window[LOADER_KEY]) {
 window[LOADER_KEY]
     .then(() => installPocketPhoneNormalRoleplayBridge())
     .catch(() => {
-        // The detailed load error is logged above.
+        // Detailed stable-loader error is logged above.
     });
