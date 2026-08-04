@@ -1,0 +1,58 @@
+name: Import Pocket Phone extension
+
+on:
+  push:
+    paths:
+      - '.github/workflows/import-pocket-phone.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out destination repository
+        uses: actions/checkout@v4
+
+      - name: Copy current extension source
+        shell: bash
+        run: |
+          set -euo pipefail
+          SOURCE_DIR="$(mktemp -d)"
+          git clone --depth 1 https://github.com/janzanaja188-cyber/pocket-phone.git "$SOURCE_DIR"
+
+          find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          cp -a "$SOURCE_DIR"/. .
+          rm -rf .git
+
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          path = Path('manifest.json')
+          manifest = json.loads(path.read_text(encoding='utf-8'))
+          manifest['version'] = '0.9.9'
+          manifest['homePage'] = 'https://github.com/DesZiDesu/Pocket-Phone'
+          manifest['auto_update'] = True
+          path.write_text(json.dumps(manifest, ensure_ascii=False, indent=4) + '\n', encoding='utf-8')
+          PY
+
+          cat > IMPORT-NOTE.md <<'EOF'
+          # Imported Pocket Phone build
+
+          This repository contains the current Pocket Phone SillyTavern extension copied from `janzanaja188-cyber/pocket-phone` on 2026-08-04.
+
+          The upstream manifest still declared `0.9.6`; this copy corrects the extension manifest to `0.9.9` and points update metadata to this repository.
+          EOF
+
+      - name: Commit imported extension
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Import Pocket Phone 0.9.9 and fix extension manifest"
+          git push origin HEAD:main
