@@ -29,12 +29,52 @@ Existing contact follows or requests to follow the user: [PP_FOLLOW:Contact Name
 
 Rules: one command per line; multiple commands are allowed only when multiple events really occur. Amounts use positive whole digits without commas or currency symbols. Do not put ] inside fields. Use PP_NEWCHAT only for someone not already saved. Do not invent other PP_ commands.]`;
 
+const getSillyTavernContext = () => {
+    try { return window.SillyTavern?.getContext?.() || null; } catch { return null; }
+};
+
+const getBridgeConfig = () => {
+    const context = getSillyTavernContext();
+    try {
+        if (typeof window.getCfg === 'function') return window.getCfg();
+    } catch {}
+    return context?.extensionSettings?.['pocket-phone'] || null;
+};
+
+let upstreamGenerationInterceptor = (() => {
+    const existing = window.ppGenInterceptor;
+    return typeof existing === 'function' && !existing.__ppNormalRoleplayBridge ? existing : null;
+})();
+
+function pocketPhoneGenerationInterceptor(...args) {
+    if (typeof upstreamGenerationInterceptor === 'function') {
+        try { upstreamGenerationInterceptor.apply(this, args); }
+        catch (error) { console.warn('[Pocket Phone bridge] upstream generation interceptor failed', error); }
+    }
+
+    try {
+        const chat = args[0];
+        const cfg = getBridgeConfig();
+        if (!cfg?.universeAffectsRP || !Array.isArray(chat)) return;
+        if (chat.some(message => String(message?.mes || '').includes('[Pocket Phone normal-roleplay integration'))) return;
+        chat.push({
+            is_user: false,
+            is_system: true,
+            name: 'PocketPhoneBridge',
+            mes: NORMAL_ROLEPLAY_INSTRUCTION,
+        });
+    } catch (error) {
+        console.warn('[Pocket Phone bridge] generation instruction failed', error);
+    }
+}
+
+pocketPhoneGenerationInterceptor.__ppNormalRoleplayBridge = true;
+window.ppGenInterceptor = pocketPhoneGenerationInterceptor;
+
 function installPocketPhoneNormalRoleplayBridge() {
     if (window[BRIDGE_KEY]) return;
 
-    const context = (() => {
-        try { return window.SillyTavern?.getContext?.(); } catch { return null; }
-    })();
+    const context = getSillyTavernContext();
 
     if (!context) {
         console.warn('[Pocket Phone bridge] SillyTavern context was not available.');
@@ -46,15 +86,7 @@ function installPocketPhoneNormalRoleplayBridge() {
         return typeof fn === 'function' ? fn(...args) : undefined;
     };
 
-    const getConfig = () => {
-        try {
-            return callGlobal('getCfg')
-                || context.extensionSettings?.['pocket-phone']
-                || null;
-        } catch {
-            return context.extensionSettings?.['pocket-phone'] || null;
-        }
-    };
+    const getConfig = () => getBridgeConfig();
 
     const saveSettings = () => {
         try {
@@ -75,29 +107,13 @@ function installPocketPhoneNormalRoleplayBridge() {
         try { window.toastr?.info('Pocket Phone normal-chat integration is enabled.'); } catch {}
     }
 
-    const upstreamInterceptor = window.ppGenInterceptor;
-    if (typeof upstreamInterceptor === 'function' && !upstreamInterceptor.__ppNormalRoleplayBridge) {
-        const wrappedInterceptor = function (...args) {
-            upstreamInterceptor.apply(this, args);
-            try {
-                const chat = args[0];
-                const cfg = getConfig();
-                if (!cfg?.universeAffectsRP || !Array.isArray(chat)) return;
-                if (chat.some(message => String(message?.mes || '').includes('[Pocket Phone normal-roleplay integration'))) return;
-                chat.push({
-                    is_user: false,
-                    is_system: true,
-                    name: 'PocketPhoneBridge',
-                    mes: NORMAL_ROLEPLAY_INSTRUCTION,
-                });
-            } catch (error) {
-                console.warn('[Pocket Phone bridge] generation instruction failed', error);
-            }
-        };
-        wrappedInterceptor.__ppNormalRoleplayBridge = true;
-        wrappedInterceptor.__ppUpstream = upstreamInterceptor;
-        window.ppGenInterceptor = wrappedInterceptor;
+    const installedInterceptor = window.ppGenInterceptor;
+    if (typeof installedInterceptor === 'function'
+        && installedInterceptor !== pocketPhoneGenerationInterceptor
+        && !installedInterceptor.__ppNormalRoleplayBridge) {
+        upstreamGenerationInterceptor = installedInterceptor;
     }
+    window.ppGenInterceptor = pocketPhoneGenerationInterceptor;
 
     if (!context.eventSource || !context.event_types) {
         console.warn('[Pocket Phone bridge] SillyTavern event API was not available.');
@@ -178,7 +194,7 @@ function installPocketPhoneNormalRoleplayBridge() {
             const cfg = getConfig();
             if (!cfg?.universeAffectsRP) return;
 
-            const current = window.SillyTavern?.getContext?.();
+            const current = getSillyTavernContext();
             if (!current || !Array.isArray(current.chat) || !current.chat.length) return;
             const last = current.chat[current.chat.length - 1];
             if (!last || last.is_user) return;
