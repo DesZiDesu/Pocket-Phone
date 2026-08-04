@@ -1,8 +1,8 @@
-# Pocket Phone 0.9.10 — SillyTavern integration fork
+# Pocket Phone 0.10.0 — SillyTavern integration fork
 
 This fork packages Pocket Phone's normal-roleplay integration directly inside the extension. No Lorebook, World Info entry, Author's Note, or separate prompt is required.
 
-It is based on upstream Pocket Phone 0.9.9 and also fixes the stale upstream manifest that reported version 0.9.6.
+Version 0.10.0 adds an optional feature suite. **Every feature added by the suite defaults to off and can be enabled or disabled independently.** Existing Pocket Phone functionality and its original settings continue to work normally.
 
 ## Install or update
 
@@ -12,57 +12,89 @@ In SillyTavern, open **Extensions → Install Extension** and use:
 https://github.com/DesZiDesu/Pocket-Phone
 ```
 
-For an existing installation, use the extension update button, then fully reload SillyTavern. The Extensions panel should report **0.9.10**.
+For an existing installation, use the extension update button and fully reload SillyTavern. The Extensions panel should report **0.10.0**.
+
+## Open the optional features
+
+1. Open Pocket Phone.
+2. Open **Settings**.
+3. Scroll to **Optional feature suite**.
+4. Press **Open optional features**.
+5. Enable only the systems you want.
+
+Nothing in the optional suite is activated automatically.
 
 ## Built-in normal-chat integration
 
-The extension registers its generation interceptor immediately and injects the full Pocket Phone command contract during ordinary SillyTavern roleplay generation.
+The extension registers `ppGenInterceptor` and supplies the Pocket Phone event contract during ordinary SillyTavern roleplay generation. The existing **Affects main roleplay** Pocket Phone setting remains the master control for normal-chat events.
 
-On the first run of this version, it enables these Pocket Phone settings once:
+Supported direct events include text messages, new NPC chats, calls, voice messages, stickers, locations, notes, polls, gifts, contact cards, transfers, earnings, and follow requests. Enabled optional systems add image, social, calendar, reminder, reaction, and world-memory commands.
 
-- Bot/NPC cross-chat
-- Affects main roleplay
-- Bot can call automatically
+## Optional feature suite
 
-After that one-time migration, manually turning a setting off is respected.
+### Autonomy and world intelligence
 
-A character or NPC can create these Pocket Phone events from an ordinary SillyTavern response:
+- **Autonomous NPC activity** — contacts may independently message, call, send voice notes, post, create stories, or send gifts while SillyTavern remains open.
+- **Per-contact controls** — individual permissions for messages, calls, voice, social activity, gifts, payments, quiet-hour exceptions, aliases, TTS voice, availability, and extra cooldowns.
+- **Contact availability and routines** — configurable days and available hours.
+- **Structured world memory** — persistent facts included in Pocket Phone generation context.
+- **Contact alias resolver** — maps nicknames and alternate names to saved contacts.
+- Adjustable autonomy interval, probability, cooldown, maximum events per hour, and quiet hours.
 
-- Existing-contact text message
-- New NPC conversation
-- Incoming call
-- Voice message
-- Sticker
-- Shared location
-- Contact status/note
-- Poll
-- Gift
-- Shared contact card
-- Incoming wallet transfer
-- Story-earned money
-- Follow or follow request
+### Messages and notifications
 
-The extension processes the hidden control command, creates the corresponding phone event, notification and unread state, then removes the command from the visible roleplay response.
+- **Real scheduler** — persisted message, call, voice, note, gift, and reminder events with one-time, daily, or weekly recurrence.
+- **Delivery and read receipts** — sent, delivered, and read states with configurable delay.
+- **Message reactions** — user reactions by double-clicking a message and optional NPC reaction commands.
+- **Browser TTS** — voice-message playback with rate, pitch, volume, autoplay, and per-contact browser voice selection.
+- **Browser notifications** — native notifications with optional previews and explicit browser permission.
 
-## Usage
+### Media, social, and planning
 
-Chat normally in SillyTavern. When the current scene gives a character a believable reason to contact you privately, the model may initiate the appropriate Pocket Phone event automatically.
+- **Image-message bridge** — accepts an image URL or calls a configurable HTTP image endpoint.
+- **Feed and story bridge** — roleplay or autonomy can create posts, text stories, comments, and likes.
+- **Calendar and reminders** — proposed events may be accepted or deleted; accepted events notify when due.
 
-No command needs to be typed by the user and no Lorebook needs to be attached to the character.
+The optional image endpoint receives:
 
-For best results, make sure the relevant NPC exists as a Pocket Phone contact. A new NPC can still create a first conversation automatically and will be added as a contact.
+```json
+{
+  "prompt": "image description",
+  "contact": "Contact Name"
+}
+```
+
+It may return JSON containing `dataUrl` or `url`, or return an image response directly. A bearer key can be configured in the feature-suite settings.
+
+### Reliability and data
+
+- **Full backup and restore** — exports Pocket Phone configuration, contacts, threads, calls, wallet data, feed, stories, suite settings, and stored media.
+- **Diagnostics** — command-processing logs, capability report, test message, test notification, and JSON export.
+- **Event deduplication and transactions** — persistent event hashes and processing status.
+- **Optional offline upstream cache** — caches the pinned upstream JavaScript after a successful load and can use it if the network later fails. This takes effect after reload.
+
+## Important behavior
+
+- All optional features start disabled.
+- Contact policies only apply when **Per-contact controls** is enabled.
+- Availability schedules only apply when **Contact availability and routines** is enabled.
+- Autonomous activity and scheduled events run only while SillyTavern is open in the browser. Overdue scheduled events are evaluated after the extension is active again.
+- Native browser notifications require permission and may be limited by browser or operating-system policy.
+- Browser TTS uses voices installed or exposed by the current browser.
+- Image URLs and custom image endpoints may be blocked by CORS or content-security rules.
+- Model compliance varies. Stronger models generally follow hidden event commands more reliably.
 
 ## Implementation
 
-The local manifest declares:
+The manifest declares:
 
 ```json
 "generate_interceptor": "ppGenInterceptor"
 ```
 
-The interceptor function is registered synchronously by the local loader, so SillyTavern can resolve it even before the pinned upstream script finishes loading.
+The local loader registers the interceptor synchronously, loads the pinned upstream 0.9.9 implementation, then concatenates and executes the local optional feature-suite modules.
 
-The extension loads the exact upstream 0.9.9 snapshot at commit:
+Pinned upstream commit:
 
 ```text
 f22ed2fcced366031b6f88271db921ebcf007d32
@@ -74,9 +106,12 @@ Upstream repository:
 https://github.com/janzanaja188-cyber/pocket-phone
 ```
 
-## Limits
+## Quick verification
 
-- Phone events are evaluated after a normal SillyTavern assistant generation. This is not a background timer while the chat is idle.
-- Model compliance varies. Stronger models generally follow the hidden event contract more reliably.
-- Image messages require actual media stored by Pocket Phone and are not fabricated from text commands.
-- The pinned upstream JavaScript and stylesheet are delivered through jsDelivr, so an internet connection is required when the extension loads.
+After updating and reloading:
+
+1. Confirm the Extensions panel shows **0.10.0**.
+2. Open Pocket Phone Settings.
+3. Confirm the **Optional feature suite** card appears.
+4. Open **Diagnostics**, enable it, and use **Test message** with at least one saved contact.
+5. Enable other systems individually after the basic test succeeds.
