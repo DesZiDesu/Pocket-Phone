@@ -1,66 +1,110 @@
-// Pocket Phone 0.9.9 compatibility mirror.
-// Loads the exact upstream repository snapshot pinned below, then installs
-// the Lorebook/normal-roleplay bridge extensions maintained by DesZiDesu.
+// Pocket Phone 0.9.10 integration fork.
+// Loads the pinned upstream Pocket Phone 0.9.9 implementation, then installs
+// a built-in normal-roleplay bridge. No Lorebook is required.
 
-const POCKET_PHONE_VERSION = '0.9.9';
+const POCKET_PHONE_VERSION = '0.9.10';
+const POCKET_PHONE_UPSTREAM_VERSION = '0.9.9';
 const POCKET_PHONE_UPSTREAM_COMMIT = 'f22ed2fcced366031b6f88271db921ebcf007d32';
 const POCKET_PHONE_SCRIPT_URL = `https://cdn.jsdelivr.net/gh/janzanaja188-cyber/pocket-phone@${POCKET_PHONE_UPSTREAM_COMMIT}/index.js`;
-const LOADER_KEY = '__deszidesuPocketPhone099Loader';
-const BRIDGE_KEY = '__deszidesuPocketPhoneLorebookBridge';
+const LOADER_KEY = '__deszidesuPocketPhoneLoader';
+const BRIDGE_KEY = '__deszidesuPocketPhoneNormalRoleplayBridge';
+const BRIDGE_MIGRATION_KEY = 'normalRoleplayBridgeV1';
 
-const EXTENDED_BRIDGE_INSTRUCTION = `[Pocket Phone extended bridge — invisible control tags for the installed Pocket Phone extension.
-Use an exact Pocket Phone contact name. Put each tag on its own final line, outside narration and dialogue. Emit a tag only when the event truly happens in the story. Never explain, quote, or roleplay the tags.
-Existing contact voice message: [PP_VOICE:Contact Name|spoken words]
-Configured sticker: [PP_STICKER:Contact Name|sticker label]
-Shared location: [PP_LOCATION:Contact Name|place|optional note]
-Contact status/note: [PP_NOTE:Contact Name|short status]
-Incoming poll: [PP_POLL:Contact Name|question|option 1|option 2|more options]
-Incoming gift: [PP_GIFT:Contact Name|gift name|optional numeric value]
-Shared contact card: [PP_CONTACT:Contact Name|Shared Contact Name]
-The base Pocket Phone bridge separately supports PP_CALL, PP_MSG, PP_NEWCHAT, PP_PAY, PP_EARN, and PP_FOLLOW. Do not invent other PP_ tags.]`;
+const NORMAL_ROLEPLAY_INSTRUCTION = `[Pocket Phone normal-roleplay integration — invisible machine commands for the installed Pocket Phone extension.
+Write the ordinary roleplay response normally. Only when a phone-side event truly happens, append the appropriate command on its own final line, outside narration and dialogue. Never explain, quote, roleplay, or put these commands in a code fence. Use exact saved Pocket Phone contact names whenever possible. Do not force phone activity every turn. Never decide that the user answered, accepted, read, paid, followed, voted, or picked up unless that already happened.
 
-function installPocketPhoneLorebookBridge() {
+Existing contact sends text: [PP_MSG:Contact Name|message]
+New NPC starts first phone thread: [PP_NEWCHAT:New NPC Name|first message]
+Existing contact starts incoming call: [PP_CALL:Contact Name]
+Existing contact sends voice message: [PP_VOICE:Contact Name|spoken transcription]
+Existing contact sends configured sticker: [PP_STICKER:Contact Name|exact sticker label]
+Existing contact shares location: [PP_LOCATION:Contact Name|place|optional note]
+Existing contact changes status/note: [PP_NOTE:Contact Name|short status]
+Existing contact sends poll: [PP_POLL:Contact Name|question|option 1|option 2|more options]
+Existing contact sends gift: [PP_GIFT:Contact Name|gift name|optional whole-number value]
+Existing contact shares another saved contact: [PP_CONTACT:Contact Name|Shared Contact Name]
+Existing contact transfers money to the user: [PP_PAY:Contact Name|whole-number amount|reason]
+User earns money from a story event without a specific sender: [PP_EARN:whole-number amount|reason]
+Existing contact follows or requests to follow the user: [PP_FOLLOW:Contact Name]
+
+Rules: one command per line; multiple commands are allowed only when multiple events really occur. Amounts use positive whole digits without commas or currency symbols. Do not put ] inside fields. Use PP_NEWCHAT only for someone not already saved. Do not invent other PP_ commands.]`;
+
+function installPocketPhoneNormalRoleplayBridge() {
     if (window[BRIDGE_KEY]) return;
-
-    const upstreamInterceptor = window.ppGenInterceptor;
-    if (typeof upstreamInterceptor === 'function' && !upstreamInterceptor.__ppLorebookExtended) {
-        const wrappedInterceptor = function (...args) {
-            upstreamInterceptor.apply(this, args);
-            try {
-                const chat = args[0];
-                const cfg = typeof window.getCfg === 'function' ? window.getCfg() : null;
-                if (!cfg?.universeAffectsRP || !Array.isArray(chat)) return;
-                if (chat.some(message => String(message?.mes || '').includes('[Pocket Phone extended bridge'))) return;
-                chat.push({
-                    is_user: false,
-                    is_system: true,
-                    name: 'PocketPhoneLorebook',
-                    mes: EXTENDED_BRIDGE_INSTRUCTION,
-                });
-            } catch (error) {
-                console.warn('[Pocket Phone lorebook bridge] interceptor extension failed', error);
-            }
-        };
-        wrappedInterceptor.__ppLorebookExtended = true;
-        wrappedInterceptor.__ppUpstream = upstreamInterceptor;
-        window.ppGenInterceptor = wrappedInterceptor;
-    }
 
     const context = (() => {
         try { return window.SillyTavern?.getContext?.(); } catch { return null; }
     })();
 
-    if (!context?.eventSource || !context?.event_types) {
-        console.warn('[Pocket Phone lorebook bridge] SillyTavern event API was not available.');
+    if (!context) {
+        console.warn('[Pocket Phone bridge] SillyTavern context was not available.');
         return;
     }
-
-    let lastFingerprint = '';
 
     const callGlobal = (name, ...args) => {
         const fn = window[name];
         return typeof fn === 'function' ? fn(...args) : undefined;
     };
+
+    const getConfig = () => {
+        try {
+            return callGlobal('getCfg')
+                || context.extensionSettings?.['pocket-phone']
+                || null;
+        } catch {
+            return context.extensionSettings?.['pocket-phone'] || null;
+        }
+    };
+
+    const saveSettings = () => {
+        try {
+            if (typeof context.saveSettingsDebounced === 'function') context.saveSettingsDebounced();
+            else callGlobal('saveCfg');
+        } catch {}
+    };
+
+    // One-time migration: enable the bridge for existing installations. After this,
+    // users can turn the settings off and the extension will respect that choice.
+    const initialConfig = getConfig();
+    if (initialConfig && !initialConfig[BRIDGE_MIGRATION_KEY]) {
+        initialConfig.sharedUniverse = true;
+        initialConfig.universeAffectsRP = true;
+        initialConfig.botCallKeyword = true;
+        initialConfig[BRIDGE_MIGRATION_KEY] = true;
+        saveSettings();
+        try { window.toastr?.info('Pocket Phone normal-chat integration is enabled.'); } catch {}
+    }
+
+    const upstreamInterceptor = window.ppGenInterceptor;
+    if (typeof upstreamInterceptor === 'function' && !upstreamInterceptor.__ppNormalRoleplayBridge) {
+        const wrappedInterceptor = function (...args) {
+            upstreamInterceptor.apply(this, args);
+            try {
+                const chat = args[0];
+                const cfg = getConfig();
+                if (!cfg?.universeAffectsRP || !Array.isArray(chat)) return;
+                if (chat.some(message => String(message?.mes || '').includes('[Pocket Phone normal-roleplay integration'))) return;
+                chat.push({
+                    is_user: false,
+                    is_system: true,
+                    name: 'PocketPhoneBridge',
+                    mes: NORMAL_ROLEPLAY_INSTRUCTION,
+                });
+            } catch (error) {
+                console.warn('[Pocket Phone bridge] generation instruction failed', error);
+            }
+        };
+        wrappedInterceptor.__ppNormalRoleplayBridge = true;
+        wrappedInterceptor.__ppUpstream = upstreamInterceptor;
+        window.ppGenInterceptor = wrappedInterceptor;
+    }
+
+    if (!context.eventSource || !context.event_types) {
+        console.warn('[Pocket Phone bridge] SillyTavern event API was not available.');
+        return;
+    }
+
+    let lastFingerprint = '';
 
     const displayName = contact => {
         try { return callGlobal('dname', contact) || contact?.customName || contact?.name || '?'; }
@@ -70,10 +114,10 @@ function installPocketPhoneLorebookBridge() {
     const findContactByName = rawName => {
         const name = String(rawName || '').trim();
         const contacts = callGlobal('getContacts') || [];
-        return contacts.find(contact => displayName(contact).toLowerCase() === name.toLowerCase())
+        const wanted = name.toLowerCase();
+        return contacts.find(contact => displayName(contact).toLowerCase() === wanted)
             || contacts.find(contact => {
                 const shown = displayName(contact).toLowerCase();
-                const wanted = name.toLowerCase();
                 return wanted && (wanted.includes(shown) || shown.includes(wanted));
             })
             || null;
@@ -90,7 +134,7 @@ function installPocketPhoneLorebookBridge() {
         const existing = findContactByName(name);
         if (existing) return existing;
 
-        const cfg = callGlobal('getCfg');
+        const cfg = getConfig();
         if (!cfg || !Array.isArray(cfg.contacts)) return null;
 
         let matchedCharacter = null;
@@ -103,14 +147,14 @@ function installPocketPhoneLorebookBridge() {
             ? { id: matchedCharacter.id, name: matchedCharacter.name, avatar: matchedCharacter.avatar }
             : { id: `npc:${makeId()}`, name, avatar: '', npc: true };
         cfg.contacts.push(contact);
-        callGlobal('saveCfg');
+        saveSettings();
         return contact;
     };
 
     const refreshPhoneViews = contact => {
         try {
             if (callGlobal('ppViewing', contact.id)) callGlobal('renderThread');
-            else if (window.ppCurrentScreen === 'messages') callGlobal('renderContactList');
+            else callGlobal('renderContactList');
             callGlobal('updateHomeWidgets');
         } catch {}
     };
@@ -131,7 +175,7 @@ function installPocketPhoneLorebookBridge() {
 
     const parseExtendedTags = async () => {
         try {
-            const cfg = callGlobal('getCfg');
+            const cfg = getConfig();
             if (!cfg?.universeAffectsRP) return;
 
             const current = window.SillyTavern?.getContext?.();
@@ -207,7 +251,8 @@ function installPocketPhoneLorebookBridge() {
                 }
             }
 
-            if (!found && !/\[PP_(?:VOICE|STICKER|LOCATION|NOTE|POLL|GIFT|CONTACT):/i.test(original)) return;
+            const hasExtendedTag = /\[PP_(?:VOICE|STICKER|LOCATION|NOTE|POLL|GIFT|CONTACT):/i.test(original);
+            if (!found && !hasExtendedTag) return;
 
             const cleaned = original
                 .replace(/\[PP_(?:VOICE|STICKER|LOCATION|NOTE|POLL|GIFT|CONTACT):[^\]]*\]/gi, '')
@@ -224,10 +269,14 @@ function installPocketPhoneLorebookBridge() {
                         node.innerHTML = current.messageFormatting(cleaned, last.name, false, false, index);
                     }
                 } catch {}
-                try { await callGlobal('ppSaveChatNow'); } catch {}
+                try {
+                    if (typeof current.saveChatDebounced === 'function') current.saveChatDebounced();
+                    else if (typeof current.saveChat === 'function') await current.saveChat();
+                    else await callGlobal('ppSaveChatNow');
+                } catch {}
             }
         } catch (error) {
-            console.warn('[Pocket Phone lorebook bridge] tag processing failed', error);
+            console.warn('[Pocket Phone bridge] tag processing failed', error);
         }
     };
 
@@ -236,16 +285,16 @@ function installPocketPhoneLorebookBridge() {
     if (events.CHARACTER_MESSAGE_RENDERED) context.eventSource.on(events.CHARACTER_MESSAGE_RENDERED, () => setTimeout(parseExtendedTags, 260));
 
     window[BRIDGE_KEY] = {
-        version: '1.0.0',
+        version: '1.1.0',
         parseExtendedTags,
-        instruction: EXTENDED_BRIDGE_INSTRUCTION,
+        instruction: NORMAL_ROLEPLAY_INSTRUCTION,
     };
-    console.info('[Pocket Phone lorebook bridge] Installed extended normal-roleplay integration.');
+    console.info('[Pocket Phone bridge] Built-in normal-roleplay integration installed. No Lorebook required.');
 }
 
 if (!window[LOADER_KEY]) {
     window[LOADER_KEY] = new Promise((resolve, reject) => {
-        const existing = document.querySelector('script[data-pocket-phone-mirror="0.9.9"]');
+        const existing = document.querySelector(`script[data-pocket-phone-mirror="${POCKET_PHONE_UPSTREAM_VERSION}"]`);
         if (existing) {
             if (existing.dataset.loaded === 'true') resolve();
             else {
@@ -258,20 +307,18 @@ if (!window[LOADER_KEY]) {
         const script = document.createElement('script');
         script.src = POCKET_PHONE_SCRIPT_URL;
         script.async = false;
-        script.dataset.pocketPhoneMirror = POCKET_PHONE_VERSION;
+        script.dataset.pocketPhoneMirror = POCKET_PHONE_UPSTREAM_VERSION;
         script.addEventListener('load', () => {
             script.dataset.loaded = 'true';
-            console.info(`[Pocket Phone mirror] Loaded v${POCKET_PHONE_VERSION} from pinned upstream commit ${POCKET_PHONE_UPSTREAM_COMMIT}.`);
+            console.info(`[Pocket Phone ${POCKET_PHONE_VERSION}] Loaded upstream ${POCKET_PHONE_UPSTREAM_VERSION} from pinned commit ${POCKET_PHONE_UPSTREAM_COMMIT}.`);
             resolve();
         }, { once: true });
         script.addEventListener('error', () => {
-            const error = new Error(`Unable to load Pocket Phone v${POCKET_PHONE_VERSION} from ${POCKET_PHONE_SCRIPT_URL}`);
+            const error = new Error(`Unable to load Pocket Phone ${POCKET_PHONE_UPSTREAM_VERSION} from ${POCKET_PHONE_SCRIPT_URL}`);
             console.error('[Pocket Phone mirror]', error);
             try {
-                window.toastr?.error('Pocket Phone 0.9.9 could not be downloaded. Check your internet connection and reload SillyTavern.');
-            } catch (_) {
-                // Notification support is optional.
-            }
+                window.toastr?.error('Pocket Phone could not be downloaded. Check your internet connection and reload SillyTavern.');
+            } catch {}
             reject(error);
         }, { once: true });
         document.head.appendChild(script);
@@ -279,7 +326,7 @@ if (!window[LOADER_KEY]) {
 }
 
 window[LOADER_KEY]
-    .then(() => installPocketPhoneLorebookBridge())
+    .then(() => installPocketPhoneNormalRoleplayBridge())
     .catch(() => {
-        // The detailed error is logged above; consume the rejection to avoid an unhandled-promise warning.
+        // The detailed load error is logged above.
     });
