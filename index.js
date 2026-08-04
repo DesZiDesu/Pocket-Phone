@@ -1,8 +1,8 @@
-// Pocket Phone 0.10.0 integration fork.
-// Loads the pinned upstream implementation, then installs the optional feature suite.
-// All newly added feature-suite systems default to disabled.
+// Pocket Phone 0.10.1 integration fork.
+// Loads the pinned upstream implementation, installs the optional feature suite,
+// and corrects the visible upstream version label. All suite features default off.
 
-const POCKET_PHONE_VERSION = '0.10.0';
+const POCKET_PHONE_VERSION = '0.10.1';
 const POCKET_PHONE_UPSTREAM_VERSION = '0.9.9';
 const POCKET_PHONE_UPSTREAM_COMMIT = 'f22ed2fcced366031b6f88271db921ebcf007d32';
 const POCKET_PHONE_UPSTREAM_URL = `https://cdn.jsdelivr.net/gh/janzanaja188-cyber/pocket-phone@${POCKET_PHONE_UPSTREAM_COMMIT}/index.js`;
@@ -15,9 +15,12 @@ const POCKET_PHONE_SUITE_PARTS = [
     'features/feature-suite.05.txt',
     'features/feature-suite.06.txt',
 ].map(path => new URL(path, POCKET_PHONE_LOCAL_BASE).href);
-const LOADER_KEY = '__deszidesuPocketPhoneLoader0100';
-const INTERCEPTOR_WRAPPER_KEY = '__deszidesuPocketPhoneInterceptorWrapper0100';
+const LOADER_KEY = '__deszidesuPocketPhoneLoader0101';
+const INTERCEPTOR_WRAPPER_KEY = '__deszidesuPocketPhoneInterceptorWrapper0101';
+const VERSION_PATCH_KEY = '__deszidesuPocketPhoneVisibleVersionPatch0101';
 const UPSTREAM_CACHE_KEY = '__pp_upstream_099_cache';
+
+window.PP_FORK_VERSION = POCKET_PHONE_VERSION;
 
 function readFeatureSuiteFlags() {
     try {
@@ -38,7 +41,7 @@ if (!window[INTERCEPTOR_WRAPPER_KEY]) {
 }
 window.ppGenInterceptor = window[INTERCEPTOR_WRAPPER_KEY];
 
-function executeUpstreamSource(source) {
+function executeSource(source) {
     return new Promise((resolve, reject) => {
         try {
             const blob = new Blob([source], { type: 'text/javascript' });
@@ -98,12 +101,12 @@ async function loadUpstream() {
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const source = await response.text();
         try { localStorage.setItem(UPSTREAM_CACHE_KEY, source); } catch {}
-        await executeUpstreamSource(source);
+        await executeSource(source);
     } catch (networkError) {
         const cached = localStorage.getItem(UPSTREAM_CACHE_KEY);
         if (!cached) throw networkError;
         console.warn('[Pocket Phone] Network load failed; using the optional cached upstream source.', networkError);
-        await executeUpstreamSource(cached);
+        await executeSource(cached);
     }
 }
 
@@ -113,7 +116,33 @@ async function loadFeatureSuite() {
         if (!response.ok) throw new Error(`Feature-suite part failed: ${url} (${response.status})`);
         return response.text();
     }));
-    await executeUpstreamSource(responses.join('\n'));
+    await executeSource(responses.join('\n'));
+}
+
+function refreshVisibleVersionLabels() {
+    const root = document.getElementById('pp-dialog');
+    if (!root) return;
+
+    const oldLabel = `Pocket Phone ${POCKET_PHONE_UPSTREAM_VERSION}`;
+    const newLabel = `Pocket Phone ${POCKET_PHONE_VERSION}`;
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    let node;
+    while ((node = walker.nextNode())) {
+        const value = node.nodeValue || '';
+        if (value.includes(oldLabel)) node.nodeValue = value.split(oldLabel).join(newLabel);
+    }
+}
+
+function installVisibleVersionPatch() {
+    if (window[VERSION_PATCH_KEY]) {
+        window[VERSION_PATCH_KEY].refresh();
+        return;
+    }
+
+    const observer = new MutationObserver(refreshVisibleVersionLabels);
+    observer.observe(document.documentElement, { childList: true, subtree: true, characterData: true });
+    window[VERSION_PATCH_KEY] = { observer, refresh: refreshVisibleVersionLabels };
+    refreshVisibleVersionLabels();
 }
 
 if (!window[LOADER_KEY]) {
@@ -124,11 +153,13 @@ if (!window[LOADER_KEY]) {
                 window.__ppUpstreamInterceptor = loaded;
             }
             window.ppGenInterceptor = window[INTERCEPTOR_WRAPPER_KEY];
+            installVisibleVersionPatch();
             console.info(`[Pocket Phone ${POCKET_PHONE_VERSION}] Loaded upstream ${POCKET_PHONE_UPSTREAM_VERSION} from pinned commit ${POCKET_PHONE_UPSTREAM_COMMIT}.`);
             return loadFeatureSuite();
         })
         .then(() => {
             window.ppGenInterceptor = window[INTERCEPTOR_WRAPPER_KEY];
+            installVisibleVersionPatch();
             console.info(`[Pocket Phone ${POCKET_PHONE_VERSION}] Optional feature suite loaded.`);
         })
         .catch(error => {
