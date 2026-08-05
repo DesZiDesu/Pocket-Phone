@@ -1,11 +1,11 @@
-// Pocket Phone 0.11.2 safe update entry.
+// Pocket Phone 0.11.3 safe update entry.
 (() => {
     'use strict';
 
-    const VERSION = '0.11.2';
+    const VERSION = '0.11.3';
     const BUILD_KEY = 'pp-safe-entry-build';
     const BUST_KEY = 'pp-safe-entry-bust';
-    const PANEL_ID = 'pp-maintenance-0112';
+    const PANEL_ID = 'pp-maintenance-0113';
     const CURRENT_SCRIPT = document.currentScript;
 
     if (typeof window.ppGenInterceptor !== 'function') {
@@ -107,7 +107,7 @@
                 let node;
                 while ((node = walker.nextNode())) {
                     const old = node.nodeValue || '';
-                    let next = old.replace(/Pocket Phone (?:0\.9\.9|0\.10\.[3-6](?: Stable| Recovery)?|0\.11\.[01])/g, `Pocket Phone ${VERSION}`);
+                    let next = old.replace(/Pocket Phone (?:0\.9\.9|0\.10\.[3-6](?: Stable| Recovery)?|0\.11\.[0-2])/g, `Pocket Phone ${VERSION}`);
                     if (inDrawer && /^\s*0\.9\.9\s*$/.test(old)) next = old.replace('0.9.9', VERSION);
                     if (next !== old) node.nodeValue = next;
                 }
@@ -217,6 +217,7 @@
             await loadScript('chat-scope.js');
             await loadScript('core.js');
             await loadScript('feed-fix.js');
+            await loadScript('feed-generator-override.js');
             console.info(`[Pocket Phone ${VERSION}] Stable core, per-chat worlds, and feed bridge loaded.`);
         } catch (error) {
             console.error(`[Pocket Phone ${VERSION}] Module load failed.`, error);
